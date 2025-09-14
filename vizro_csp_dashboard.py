@@ -373,7 +373,8 @@ with col4:
 # ------------------ Footer ------------------
 st.markdown("""
 <div style='margin-top: 60px; padding: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #eee;'>
-    <p>📊 CSP Dashboard | Data: FY24 Q1 - FY26 Q2 | Extended Forecast Analysis | For internal use only</p>
+    <p>📊 CSP Dashboard | Data Coverage: FY24 (Complete) | FY25 (Complete) | FY26 (Apr-Jun) | For internal use only</p>
+    <p style='margin-top: 5px; font-size: 10px;'>Fiscal Year: April 1st - March 31st | Q1: Apr-Jun | Q2: Jul-Sep | Q3: Oct-Dec | Q4: Jan-Mar</p>
 </div>
 """, unsafe_allow_html=True)
 
