@@ -373,7 +373,7 @@ with col4:
 # ------------------ Footer ------------------
 st.markdown("""
 <div style='margin-top: 60px; padding: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #eee;'>
-    <p>📊 CSP Dashboard | Data refreshed automatically | For internal use only</p>
+    <p>📊 CSP Dashboard | Data: FY24 Q1 - FY26 Q2 | Extended Forecast Analysis | For internal use only</p>
 </div>
 """, unsafe_allow_html=True)
 
