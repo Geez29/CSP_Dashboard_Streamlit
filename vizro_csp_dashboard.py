@@ -1,17 +1,16 @@
+# streamlit_csp_dashboard.py
+
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
 
-# ---------------- Streamlit Page Config ----------------
-st.set_page_config(page_title="CSP Monthly Cost Dashboard", layout="wide")
-
-# ---------------- Load Data ----------------
+# ------------------ Load Excel file ------------------
 df = pd.read_excel("CSP_Monthly_Cost_Sample Data.xlsx")
 
-# Ensure Month column is YYYY-MM
+# Ensure Month column is in YYYY-MM format
 df["Month"] = pd.to_datetime(df["Month"]).dt.strftime("%Y-%m")
 
-# Fiscal Year calculation
+# Calculate Fiscal Year if not present
 def assign_fy(date_str):
     year, month = map(int, date_str.split("-"))
     return f"FY{year+1}" if month >= 4 else f"FY{year}"
@@ -19,14 +18,19 @@ def assign_fy(date_str):
 if "FY" not in df.columns:
     df["FY"] = df["Month"].apply(assign_fy)
 
-# ---------------- Sidebar Filter ----------------
+# ------------------ Streamlit UI ------------------
+st.set_page_config(page_title="CSP Dashboard", layout="wide")
+
+st.title("CSP Dashboard")
+
+# FY Filter
 fy_options = sorted(df["FY"].unique())
-selected_fy = st.sidebar.multiselect("Select Fiscal Year(s):", fy_options, default=fy_options)
+selected_fy = st.selectbox("Select Fiscal Year (FY):", fy_options)
 
 # Filter data
-filtered_df = df[df["FY"].isin(selected_fy)]
+filtered_df = df[df["FY"] == selected_fy]
 
-# ---------------- Chart ----------------
+# ------------------ Line Chart ------------------
 max_cost = filtered_df["Cost"].max()
 
 fig = px.line(
@@ -38,7 +42,7 @@ fig = px.line(
     hover_data=["FY"]
 )
 
-# Add custom title annotation
+# Add top-centered annotation title
 fig.add_annotation(
     x=filtered_df["Month"].iloc[len(filtered_df)//2],
     y=max_cost * 1.05,
@@ -65,8 +69,7 @@ fig.update_layout(
         spikedash="dot",
         spikemode="across"
     ),
-    margin=dict(t=80)
+    margin=dict(t=100)  # extra space for top title
 )
 
-# ---------------- Streamlit Display ----------------
 st.plotly_chart(fig, use_container_width=True)
