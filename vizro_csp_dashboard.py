@@ -1,120 +1,77 @@
-# vizro_csp_dashboard.py
-
-import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+from dash import Dash, dcc, html
 
-# ------------------ Load Data ------------------
-file_path = "Cloud_Actual_Optimization Data.xlsx"
+# Load Excel file
+file_path = "cloud_spend.xlsx"  # replace with your file name
+df = pd.ExcelFile(file_path)
 
-# Load Excel with two side-by-side tables (Services, Marketplace)
-df_raw = pd.read_excel(file_path, header=0)
+# Since both Services and Marketplace are in the same sheet
+data = pd.read_excel(file_path, sheet_name=0)
 
-# Split Services (first 2 columns) & Marketplace (next 2 columns)
-df_services = df_raw.iloc[:, 0:2].dropna()
-df_marketplace = df_raw.iloc[:, 2:4].dropna()
-df_services.columns = ["Category", "Cost"]
-df_marketplace.columns = ["Category", "Cost"]
+# Clean column names
+data.columns = data.columns.str.strip()
 
-# Load CSP Monthly Cost file (separate Excel you had earlier)
-df_line = pd.read_excel("CSP_Monthly_Cost_Sample Data.xlsx")
-df_line["Month"] = pd.to_datetime(df_line["Month"]).dt.strftime("%Y-%m")
+# Keep only till FY26 Q2
+valid_quarters = [
+    "FY24 Q1", "FY24 Q2", "FY24 Q3", "FY24 Q4",
+    "FY25 Q1", "FY25 Q2", "FY25 Q3", "FY25 Q4",
+    "FY26 Q1", "FY26 Q2"
+]
 
-# Add Fiscal Year
-def assign_fy(date_str):
-    year, month = map(int, date_str.split("-"))
-    return f"FY{year+1}" if month >= 4 else f"FY{year}"
+# Filter data
+services_data = data[['Services', 'Unnamed: 1']].dropna()
+services_data.columns = ['Quarter', 'Spend']
+services_data = services_data[services_data['Quarter'].isin(valid_quarters)]
 
-if "FY" not in df_line.columns:
-    df_line["FY"] = df_line["Month"].apply(assign_fy)
+marketplace_data = data[['Marketplace', 'Unnamed: 3']].dropna()
+marketplace_data.columns = ['Quarter', 'Spend']
+marketplace_data = marketplace_data[marketplace_data['Quarter'].isin(valid_quarters)]
 
-# ------------------ Streamlit UI ------------------
-st.set_page_config(page_title="CSP Dashboard", layout="wide")
-
-# Flex logo top-left
-col_logo, col_title = st.columns([1, 6])
-with col_logo:
-    st.image("flex_logo.png", width=120)
-with col_title:
-    st.title("CSP Dashboard")
-
-# ------------------ FY Filter ------------------
-fy_options = sorted(df_line["FY"].unique())
-selected_fy = st.selectbox("Select Fiscal Year (FY):", fy_options)
-filtered_df = df_line[df_line["FY"] == selected_fy]
-
-# ------------------ Line Chart ------------------
-max_cost = filtered_df["Cost"].max()
-
-fig_line = px.line(
-    filtered_df,
-    x="Month",
-    y="Cost",
-    color="CSP",
-    markers=True,
-    hover_data=["FY"]
-)
-
-# Add top-centered annotation title
-fig_line.add_annotation(
-    x=filtered_df["Month"].iloc[len(filtered_df)//2],
-    y=max_cost * 1.05,
-    text="CSP Monthly Cost (AWS vs Azure)",
-    showarrow=False,
-    font=dict(size=18),
-    xanchor="center"
-)
-
-# Enable vertical hover line
-fig_line.update_layout(
-    hovermode="x unified",
-    xaxis=dict(
-        showspikes=True,
-        spikecolor="gray",
-        spikethickness=1,
-        spikedash="dot",
-        spikemode="across"
-    ),
-    yaxis=dict(
-        showspikes=True,
-        spikecolor="gray",
-        spikethickness=1,
-        spikedash="dot",
-        spikemode="across"
-    ),
-    margin=dict(t=100)
-)
-
-st.plotly_chart(fig_line, use_container_width=True)
-
-# ------------------ Waterfall 1: Services ------------------
+# Create Services Waterfall Chart (with cost optimization as negative values)
 fig_services = go.Figure(go.Waterfall(
-    x=df_services["Category"],
-    y=df_services["Cost"],
+    name="Services Spend",
+    orientation="v",
+    x=services_data['Quarter'],
+    y=services_data['Spend'],
+    text=services_data['Spend'],
     textposition="outside",
-    connector=dict(line=dict(color="blue")),
-    increasing=dict(marker=dict(color="#1f77b4")),  # McKinsey Blue
-    decreasing=dict(marker=dict(color="#1f77b4")),
-    totals=dict(marker=dict(color="#1f77b4"))
+    connector={"line": {"color": "blue"}}
 ))
-fig_services.update_layout(title="CSP Services Spend")
 
-# ------------------ Waterfall 2: Marketplace ------------------
+fig_services.update_layout(
+    title="CSP Services Spend",
+    waterfallgap=0.3,
+    yaxis_title="Spend ($)"
+)
+
+# Create Marketplace Waterfall Chart
 fig_marketplace = go.Figure(go.Waterfall(
-    x=df_marketplace["Category"],
-    y=df_marketplace["Cost"],
+    name="Marketplace Spend",
+    orientation="v",
+    x=marketplace_data['Quarter'],
+    y=marketplace_data['Spend'],
+    text=marketplace_data['Spend'],
     textposition="outside",
-    connector=dict(line=dict(color="darkblue")),
-    increasing=dict(marker=dict(color="#005eb8")),  # Different Blue
-    decreasing=dict(marker=dict(color="#005eb8")),
-    totals=dict(marker=dict(color="#005eb8"))
+    connector={"line": {"color": "brown"}}
 ))
-fig_marketplace.update_layout(title="CSP Marketplace Spend")
 
-# ------------------ Display both Waterfalls side by side ------------------
-col1, col2 = st.columns(2)
-with col1:
-    st.plotly_chart(fig_services, use_container_width=True)
-with col2:
-    st.plotly_chart(fig_marketplace, use_container_width=True)
+fig_marketplace.update_layout(
+    title="CSP Marketplace Spend",
+    waterfallgap=0.3,
+    yaxis_title="Spend ($)"
+)
+
+# Build Dashboard
+app = Dash(__name__)
+
+app.layout = html.Div([
+    html.H1("CSP Services & Marketplace Spend Dashboard"),
+    html.Div([
+        html.Div([dcc.Graph(figure=fig_services)], style={'width': '48%', 'display': 'inline-block'}),
+        html.Div([dcc.Graph(figure=fig_marketplace)], style={'width': '48%', 'display': 'inline-block'})
+    ])
+])
+
+if __name__ == "__main__":
+    app.run_server(debug=True)
