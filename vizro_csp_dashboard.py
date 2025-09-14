@@ -1,15 +1,17 @@
 import pandas as pd
-import vizro
-import vizro.models as vm
-import vizro.plotly.express as px
+import plotly.express as px
+import streamlit as st
 
-# Load Excel file
+# ---------------- Streamlit Page Config ----------------
+st.set_page_config(page_title="CSP Monthly Cost Dashboard", layout="wide")
+
+# ---------------- Load Data ----------------
 df = pd.read_excel("CSP_Monthly_Cost_Sample Data.xlsx")
 
-# Ensure Month column is in YYYY-MM format
+# Ensure Month column is YYYY-MM
 df["Month"] = pd.to_datetime(df["Month"]).dt.strftime("%Y-%m")
 
-# Calculate Fiscal Year if not present
+# Fiscal Year calculation
 def assign_fy(date_str):
     year, month = map(int, date_str.split("-"))
     return f"FY{year+1}" if month >= 4 else f"FY{year}"
@@ -17,12 +19,18 @@ def assign_fy(date_str):
 if "FY" not in df.columns:
     df["FY"] = df["Month"].apply(assign_fy)
 
-# Determine max Cost for placing annotation above
-max_cost = df["Cost"].max()
+# ---------------- Sidebar Filter ----------------
+fy_options = sorted(df["FY"].unique())
+selected_fy = st.sidebar.multiselect("Select Fiscal Year(s):", fy_options, default=fy_options)
 
-# Create Plotly figure
+# Filter data
+filtered_df = df[df["FY"].isin(selected_fy)]
+
+# ---------------- Chart ----------------
+max_cost = filtered_df["Cost"].max()
+
 fig = px.line(
-    df,
+    filtered_df,
     x="Month",
     y="Cost",
     color="CSP",
@@ -30,10 +38,10 @@ fig = px.line(
     hover_data=["FY"]
 )
 
-# Add title annotation **inside plotting area**, above highest data point
+# Add custom title annotation
 fig.add_annotation(
-    x=df["Month"].iloc[len(df)//2],  # center x
-    y=max_cost * 1.05,               # slightly above max y
+    x=filtered_df["Month"].iloc[len(filtered_df)//2],
+    y=max_cost * 1.05,
     text="CSP Monthly Cost (AWS vs Azure)",
     showarrow=False,
     font=dict(size=18),
@@ -60,21 +68,5 @@ fig.update_layout(
     margin=dict(t=80)
 )
 
-# Wrap figure in Vizro Graph
-graph_component = vm.Graph(figure=fig)
-
-# FY filter (no multi-select parameter in this version)
-fy_filter = vm.Filter(column="FY")
-
-# Create page without default left-top title
-page = vm.Page(
-    title="",
-    components=[graph_component],
-    controls=[fy_filter]
-)
-
-# Create dashboard
-dashboard = vm.Dashboard(pages=[page])
-
-# Run dashboard
-vizro.Vizro().build(dashboard).run()
+# ---------------- Streamlit Display ----------------
+st.plotly_chart(fig, use_container_width=True)
