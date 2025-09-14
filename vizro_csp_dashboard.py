@@ -8,127 +8,165 @@ import numpy as np
 st.set_page_config(page_title="CSP Dashboard", layout="wide")
 st.title("CSP Dashboard")
 
-# ------------------ Load Excel ------------------
-file_path = "Cloud_Actual_Optimization Data.xlsx"
+# ------------------ Load Excel Files ------------------
+line_chart_file = "CSP_Monthly_Cost_Sample Data.xlsx"
+waterfall_file = "Cloud_Actual_Optimization Data.xlsx"
 
 try:
-    # Load the waterfall data (this appears to be your main sheet)
-    df_waterfall = pd.read_excel(file_path, sheet_name=0)
-    st.success("✅ Excel file loaded successfully")
+    # ------------------ Load Line Chart Data ------------------
+    df_line = pd.read_excel(line_chart_file, sheet_name=0)
+    st.success("✅ Line chart data loaded successfully")
     
-    # Clean up the data based on your screenshot
-    # The data appears to have Services and Marketplace sections side by side
+    # Clean and process line chart data
+    df_line.columns = df_line.columns.str.strip()
     
-    # Extract Services data (left side)
+    # Convert Month to datetime and then to string format
+    if 'Month' in df_line.columns:
+        df_line["Month"] = pd.to_datetime(df_line["Month"], errors='coerce').dt.strftime("%Y-%m")
+        df_line = df_line.dropna(subset=['Month'])
+        
+        # Fiscal Year Calculation
+        def assign_fy(date_str):
+            try:
+                year, month = map(int, date_str.split("-"))
+                return f"FY{year+1}" if month >= 4 else f"FY{year}"
+            except:
+                return "Unknown"
+
+        if "FY" not in df_line.columns:
+            df_line["FY"] = df_line["Month"].apply(assign_fy)
+
+        # FY Filter
+        fy_options = sorted(df_line["FY"].unique())
+        selected_fy = st.selectbox("Select Fiscal Year (FY):", fy_options)
+        filtered_df = df_line[df_line["FY"] == selected_fy]
+
+        # ------------------ Line Chart ------------------
+        if not filtered_df.empty and 'Cost' in filtered_df.columns and 'CSP' in filtered_df.columns:
+            max_cost = filtered_df["Cost"].max()
+
+            fig_line = px.line(
+                filtered_df,
+                x="Month",
+                y="Cost",
+                color="CSP",
+                markers=True,
+                hover_data=["FY"],
+                title="CSP Monthly Cost AWS vs Azure"
+            )
+
+            # Enable vertical hover line
+            fig_line.update_layout(
+                hovermode="x unified",
+                xaxis=dict(
+                    showspikes=True,
+                    spikecolor="gray",
+                    spikethickness=1,
+                    spikemode="across"
+                ),
+                yaxis=dict(
+                    showspikes=True,
+                    spikecolor="gray",
+                    spikethickness=1,
+                    spikemode="across",
+                    title="Cost ($)"
+                ),
+                margin=dict(t=60, b=60, l=60, r=60),
+                height=500
+            )
+
+            st.plotly_chart(fig_line, use_container_width=True)
+        else:
+            st.warning("Line chart data missing required columns (Month, Cost, CSP) or no data for selected FY")
+    else:
+        st.warning("Month column not found in line chart data")
+
+except FileNotFoundError:
+    st.error(f"❌ Line chart file not found: {line_chart_file}")
+except Exception as e:
+    st.error(f"❌ Error loading line chart data: {str(e)}")
+
+try:
+    # ------------------ Load Waterfall Data ------------------
+    df_waterfall = pd.read_excel(waterfall_file, sheet_name=0)
+    st.success("✅ Waterfall data loaded successfully")
+    
+    # Extract Services and Marketplace data from your specific format
     services_data = []
-    for i, row in df_waterfall.iterrows():
-        if pd.notna(row.iloc[0]) and str(row.iloc[0]).startswith('FY'):  # Quarter column
-            quarter = row.iloc[0]
-            
-            # Get the spend values (positive and negative)
-            if pd.notna(row.iloc[2]):  # Assuming spend is in 3rd column after removing $
-                spend_str = str(row.iloc[2]).replace('$', '').replace(',', '').replace('(', '-').replace(')', '')
-                try:
-                    spend = float(spend_str)
-                    services_data.append({'Quarter': quarter, 'Spend': spend})
-                except:
-                    pass
-    
-    services_df = pd.DataFrame(services_data)
-    
-    # Extract Marketplace data (right side)
     marketplace_data = []
-    # Look for Marketplace data starting from column index around 4-6
-    for i, row in df_waterfall.iterrows():
-        if pd.notna(row.iloc[4]) and str(row.iloc[4]).startswith('FY'):  # Marketplace quarter column
-            quarter = row.iloc[4]
-            
-            # Get the spend values
-            if pd.notna(row.iloc[6]):  # Assuming marketplace spend is in 7th column
-                spend_str = str(row.iloc[6]).replace('$', '').replace(',', '').replace('(', '-').replace(')', '')
-                try:
-                    spend = float(spend_str)
-                    if spend != 0:  # Only add non-zero values
-                        marketplace_data.append({'Quarter': quarter, 'Spend': spend})
-                except:
-                    pass
     
+    # Process each row to extract quarterly data
+    for i, row in df_waterfall.iterrows():
+        # Services data (left side columns)
+        if pd.notna(row.iloc[0]):
+            quarter_str = str(row.iloc[0]).strip()
+            if quarter_str.startswith('FY') and 'Q' in quarter_str:
+                # Look for spend values in subsequent rows or columns
+                spend_values = []
+                
+                # Check multiple columns for spend data
+                for col_idx in [1, 2, 3]:
+                    if col_idx < len(row) and pd.notna(row.iloc[col_idx]):
+                        val_str = str(row.iloc[col_idx]).replace('$', '').replace(',', '').strip()
+                        if val_str and val_str != '-':
+                            # Handle negative values in parentheses
+                            if val_str.startswith('(') and val_str.endswith(')'):
+                                val_str = '-' + val_str[1:-1]
+                            try:
+                                spend_val = float(val_str)
+                                spend_values.append(spend_val)
+                            except:
+                                pass
+                
+                # Add all spend values for this quarter
+                for spend_val in spend_values:
+                    if spend_val != 0:
+                        services_data.append({'Quarter': quarter_str, 'Spend': spend_val})
+        
+        # Marketplace data (right side columns, typically starting from column 4)
+        if len(row) > 4 and pd.notna(row.iloc[4]):
+            quarter_str = str(row.iloc[4]).strip()
+            if quarter_str.startswith('FY') and 'Q' in quarter_str:
+                # Look for spend values in marketplace columns
+                for col_idx in [5, 6, 7]:
+                    if col_idx < len(row) and pd.notna(row.iloc[col_idx]):
+                        val_str = str(row.iloc[col_idx]).replace('$', '').replace(',', '').strip()
+                        if val_str and val_str != '-':
+                            # Handle negative values in parentheses
+                            if val_str.startswith('(') and val_str.endswith(')'):
+                                val_str = '-' + val_str[1:-1]
+                            try:
+                                spend_val = float(val_str)
+                                if spend_val != 0:
+                                    marketplace_data.append({'Quarter': quarter_str, 'Spend': spend_val})
+                            except:
+                                pass
+    
+    # Create DataFrames
+    services_df = pd.DataFrame(services_data)
     marketplace_df = pd.DataFrame(marketplace_data)
     
-    # If the above extraction doesn't work, let's try a different approach
-    if services_df.empty or marketplace_df.empty:
-        st.warning("Trying alternative data extraction method...")
-        
-        # Method 2: Based on your screenshot structure
-        # Services data (columns 0 and 2)
-        services_quarters = []
-        services_spends = []
-        
-        # Marketplace data (columns 4 and 6) 
-        marketplace_quarters = []
-        marketplace_spends = []
-        
-        for i, row in df_waterfall.iterrows():
-            # Services
-            if pd.notna(row.iloc[0]):
-                quarter = str(row.iloc[0])
-                if quarter.startswith('FY') and 'Q' in quarter:
-                    services_quarters.append(quarter)
-                    
-                    # Look for spend value in next rows or same row
-                    spend_val = None
-                    if len(row) > 2 and pd.notna(row.iloc[2]):
-                        spend_str = str(row.iloc[2]).replace('$', '').replace(',', '').replace('(', '-').replace(')', '').strip()
-                        try:
-                            spend_val = float(spend_str)
-                        except:
-                            spend_val = 0
-                    services_spends.append(spend_val if spend_val is not None else 0)
-            
-            # Marketplace
-            if len(row) > 4 and pd.notna(row.iloc[4]):
-                quarter = str(row.iloc[4])
-                if quarter.startswith('FY') and 'Q' in quarter:
-                    marketplace_quarters.append(quarter)
-                    
-                    # Look for spend value
-                    spend_val = None
-                    if len(row) > 6 and pd.notna(row.iloc[6]):
-                        spend_str = str(row.iloc[6]).replace('$', '').replace(',', '').replace('(', '-').replace(')', '').strip()
-                        try:
-                            spend_val = float(spend_str)
-                        except:
-                            spend_val = 0
-                    marketplace_spends.append(spend_val if spend_val is not None else 0)
-        
-        # Create DataFrames
-        if services_quarters:
-            services_df = pd.DataFrame({
-                'Quarter': services_quarters,
-                'Spend': services_spends
-            })
-        
-        if marketplace_quarters:
-            marketplace_df = pd.DataFrame({
-                'Quarter': marketplace_quarters,
-                'Spend': marketplace_spends
-            })
+    # Remove duplicates and sort by quarter
+    if not services_df.empty:
+        services_df = services_df.drop_duplicates().sort_values('Quarter')
+    if not marketplace_df.empty:
+        marketplace_df = marketplace_df.drop_duplicates().sort_values('Quarter')
     
     # Display debug info
-    st.subheader("Data Extraction Results")
+    st.subheader("Waterfall Data Extraction Results")
     col1, col2 = st.columns(2)
     
     with col1:
         st.write("**Services Data:**")
         if not services_df.empty:
-            st.dataframe(services_df)
+            st.dataframe(services_df, use_container_width=True)
         else:
             st.write("No services data found")
     
     with col2:
         st.write("**Marketplace Data:**")
         if not marketplace_df.empty:
-            st.dataframe(marketplace_df)
+            st.dataframe(marketplace_df, use_container_width=True)
         else:
             st.write("No marketplace data found")
     
@@ -139,68 +177,61 @@ try:
     
     # Services Waterfall Chart
     with col1:
-        if not services_df.empty and len(services_df) > 0:
-            # Filter out zero values for waterfall
-            services_filtered = services_df[services_df['Spend'] != 0].copy()
+        if not services_df.empty:
+            # Group by quarter and sum spend values
+            services_grouped = services_df.groupby('Quarter')['Spend'].sum().reset_index()
             
-            if not services_filtered.empty:
-                fig_services = go.Figure(go.Waterfall(
-                    name="Services Spend",
-                    orientation="v",
-                    x=services_filtered['Quarter'],
-                    y=services_filtered['Spend'],
-                    text=[f"${x:,.0f}" for x in services_filtered['Spend']],
-                    textposition="outside",
-                    connector={"line": {"color": "blue"}},
-                    decreasing={"marker": {"color": "rgb(244, 101, 101)"}},  # Red for negative
-                    increasing={"marker": {"color": "rgb(91, 155, 213)"}},   # Blue for positive
-                    totals={"marker": {"color": "rgb(37, 64, 97)"}}
-                ))
-                fig_services.update_layout(
-                    title="CSP Services Spend Waterfall",
-                    yaxis_title="Spend ($)",
-                    xaxis_tickangle=-45,
-                    height=500
-                )
-                st.plotly_chart(fig_services, use_container_width=True)
-            else:
-                st.write("No valid services data for waterfall chart")
+            fig_services = go.Figure(go.Waterfall(
+                name="Services Spend",
+                orientation="v",
+                x=services_grouped['Quarter'],
+                y=services_grouped['Spend'],
+                text=[f"${x:,.0f}" for x in services_grouped['Spend']],
+                textposition="outside",
+                connector={"line": {"color": "blue"}},
+                decreasing={"marker": {"color": "rgb(244, 101, 101)"}},  # Red for negative
+                increasing={"marker": {"color": "rgb(91, 155, 213)"}},   # Blue for positive
+                totals={"marker": {"color": "rgb(37, 64, 97)"}}
+            ))
+            fig_services.update_layout(
+                title="CSP Services Spend Waterfall",
+                yaxis_title="Spend ($)",
+                xaxis_tickangle=-45,
+                height=500,
+                margin=dict(t=60, b=100, l=60, r=60)
+            )
+            st.plotly_chart(fig_services, use_container_width=True)
         else:
-            st.write("No services data available")
+            st.write("No services data available for waterfall chart")
     
     # Marketplace Waterfall Chart
     with col2:
-        if not marketplace_df.empty and len(marketplace_df) > 0:
-            # Filter out zero values and NaN for waterfall
-            marketplace_filtered = marketplace_df[
-                (marketplace_df['Spend'] != 0) & 
-                (marketplace_df['Spend'].notna())
-            ].copy()
+        if not marketplace_df.empty:
+            # Group by quarter and sum spend values
+            marketplace_grouped = marketplace_df.groupby('Quarter')['Spend'].sum().reset_index()
             
-            if not marketplace_filtered.empty:
-                fig_marketplace = go.Figure(go.Waterfall(
-                    name="Marketplace Spend",
-                    orientation="v",
-                    x=marketplace_filtered['Quarter'],
-                    y=marketplace_filtered['Spend'],
-                    text=[f"${x:,.0f}" for x in marketplace_filtered['Spend']],
-                    textposition="outside",
-                    connector={"line": {"color": "darkblue"}},
-                    decreasing={"marker": {"color": "rgb(244, 67, 54)"}},   # Red for negative
-                    increasing={"marker": {"color": "rgb(0, 176, 240)"}},   # Light blue for positive
-                    totals={"marker": {"color": "rgb(31, 78, 121)"}}
-                ))
-                fig_marketplace.update_layout(
-                    title="CSP Marketplace Spend Waterfall",
-                    yaxis_title="Spend ($)",
-                    xaxis_tickangle=-45,
-                    height=500
-                )
-                st.plotly_chart(fig_marketplace, use_container_width=True)
-            else:
-                st.write("No valid marketplace data for waterfall chart")
+            fig_marketplace = go.Figure(go.Waterfall(
+                name="Marketplace Spend",
+                orientation="v",
+                x=marketplace_grouped['Quarter'],
+                y=marketplace_grouped['Spend'],
+                text=[f"${x:,.0f}" for x in marketplace_grouped['Spend']],
+                textposition="outside",
+                connector={"line": {"color": "darkblue"}},
+                decreasing={"marker": {"color": "rgb(244, 67, 54)"}},   # Red for negative
+                increasing={"marker": {"color": "rgb(0, 176, 240)"}},   # Light blue for positive
+                totals={"marker": {"color": "rgb(31, 78, 121)"}}
+            ))
+            fig_marketplace.update_layout(
+                title="CSP Marketplace Spend Waterfall",
+                yaxis_title="Spend ($)",
+                xaxis_tickangle=-45,
+                height=500,
+                margin=dict(t=60, b=100, l=60, r=60)
+            )
+            st.plotly_chart(fig_marketplace, use_container_width=True)
         else:
-            st.write("No marketplace data available")
+            st.write("No marketplace data available for waterfall chart")
     
     # ------------------ Summary Statistics ------------------
     st.subheader("Summary Statistics")
@@ -221,45 +252,67 @@ try:
         if not services_df.empty and not marketplace_df.empty:
             total_combined = services_df['Spend'].sum() + marketplace_df['Spend'].sum()
             st.metric("Combined Total", f"${total_combined:,.0f}")
+        elif not services_df.empty:
+            st.metric("Total Services Only", f"${services_df['Spend'].sum():,.0f}")
+        elif not marketplace_df.empty:
+            st.metric("Total Marketplace Only", f"${marketplace_df['Spend'].sum():,.0f}")
     
     with col4:
         if not services_df.empty:
-            avg_services = services_df['Spend'].mean()
-            st.metric("Avg Services per Quarter", f"${avg_services:,.0f}")
+            avg_services = services_df.groupby('Quarter')['Spend'].sum().mean()
+            st.metric("Avg Services/Quarter", f"${avg_services:,.0f}")
 
 except FileNotFoundError:
-    st.error("❌ Excel file not found. Please ensure 'Cloud_Actual_Optimization Data.xlsx' is in the repository.")
+    st.error(f"❌ Waterfall file not found: {waterfall_file}")
 except Exception as e:
-    st.error(f"❌ Error loading or processing the Excel file: {str(e)}")
-    st.write("Please check that the file structure matches the expected format.")
+    st.error(f"❌ Error loading waterfall data: {str(e)}")
     
     # Show raw data for debugging
     try:
-        df_raw = pd.read_excel(file_path, sheet_name=0)
-        st.subheader("Raw Data (First 10 rows)")
+        df_raw = pd.read_excel(waterfall_file, sheet_name=0)
+        st.subheader("Raw Waterfall Data (First 10 rows)")
         st.dataframe(df_raw.head(10))
         st.write("Columns:", list(df_raw.columns))
         st.write("Shape:", df_raw.shape)
     except:
-        st.write("Could not load raw data for debugging.")
+        st.write("Could not load raw waterfall data for debugging.")
 
-# ------------------ Manual File Upload Option ------------------
-st.subheader("Alternative: Upload Excel File")
-uploaded_file = st.file_uploader("Upload your Excel file here", type=['xlsx'])
+# ------------------ Data Quality Information ------------------
+st.subheader("Data Files Information")
+col1, col2 = st.columns(2)
 
-if uploaded_file is not None:
-    try:
-        df_uploaded = pd.read_excel(uploaded_file, sheet_name=0)
-        st.success("✅ File uploaded successfully!")
-        st.write("Shape:", df_uploaded.shape)
-        st.dataframe(df_uploaded.head())
-        
-        st.write("**Instructions for your data format:**")
-        st.write("Based on your screenshot, the app expects:")
-        st.write("- Services data in the left columns (Quarter and Spend)")
-        st.write("- Marketplace data in the right columns (Quarter and Spend)")
-        st.write("- Quarters in format: FY24 Q1, FY24 Q2, etc.")
-        st.write("- Spend values with $ signs and parentheses for negative values")
-        
-    except Exception as e:
-        st.error(f"Error with uploaded file: {str(e)}")
+with col1:
+    st.write("**Line Chart Data File:**")
+    st.write(f"📄 {line_chart_file}")
+    st.write("Expected format: Month, Cost, CSP columns")
+
+with col2:
+    st.write("**Waterfall Data File:**")
+    st.write(f"📄 {waterfall_file}")
+    st.write("Expected format: Services and Marketplace quarterly data")
+
+# ------------------ Manual File Upload Options ------------------
+st.subheader("Alternative: Upload Files Manually")
+col1, col2 = st.columns(2)
+
+with col1:
+    st.write("**Upload Line Chart Data:**")
+    uploaded_line = st.file_uploader("Upload CSP Monthly Cost data", type=['xlsx'], key="line")
+    if uploaded_line is not None:
+        try:
+            df_uploaded_line = pd.read_excel(uploaded_line, sheet_name=0)
+            st.success("✅ Line chart file uploaded!")
+            st.dataframe(df_uploaded_line.head())
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+with col2:
+    st.write("**Upload Waterfall Data:**")
+    uploaded_waterfall = st.file_uploader("Upload Optimization data", type=['xlsx'], key="waterfall")
+    if uploaded_waterfall is not None:
+        try:
+            df_uploaded_waterfall = pd.read_excel(uploaded_waterfall, sheet_name=0)
+            st.success("✅ Waterfall file uploaded!")
+            st.dataframe(df_uploaded_waterfall.head())
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
