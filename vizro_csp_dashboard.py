@@ -1,84 +1,112 @@
-# streamlit_csp_dashboard.py
+# vizro_csp_dashboard.py
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+
+# ------------------ Streamlit Page Config ------------------
+st.set_page_config(page_title="CSP Dashboard", layout="wide")
+
+# ------------------ Logo ------------------
+col1, col2 = st.columns([1, 8])
+with col1:
+    st.image("flex_logo.png", width=120)
+with col2:
+    st.title("CSP Dashboard")
 
 # ------------------ Load Excel file ------------------
-@st.cache_data
-def load_data():
-    df = pd.read_excel("CSP_Monthly_Cost_Sample Data.xlsx")
-    # Ensure Month column is in YYYY-MM format
-    df["Month"] = pd.to_datetime(df["Month"]).dt.strftime("%Y-%m")
+file_path = "Cloud_Actual_Optimization Data.xlsx"
+xls = pd.ExcelFile(file_path)
 
-    # Calculate Fiscal Year if not present
+# Assume sheet names are "Services" and "Marketplace"
+df_services = pd.read_excel(xls, sheet_name="Services")
+df_marketplace = pd.read_excel(xls, sheet_name="Marketplace")
+
+# ------------------ Data Preprocessing ------------------
+# For line chart we assume "Month", "CSP", "Cost"
+# You can merge both tables if needed, here only Services is used for line
+if "Month" in df_services.columns:
+    df_services["Month"] = pd.to_datetime(df_services["Month"]).dt.strftime("%Y-%m")
+
     def assign_fy(date_str):
         year, month = map(int, date_str.split("-"))
         return f"FY{year+1}" if month >= 4 else f"FY{year}"
 
-    if "FY" not in df.columns:
-        df["FY"] = df["Month"].apply(assign_fy)
+    if "FY" not in df_services.columns:
+        df_services["FY"] = df_services["Month"].apply(assign_fy)
 
-    return df
-
-df = load_data()
-
-# ------------------ Streamlit UI ------------------
-st.set_page_config(page_title="CSP Dashboard", layout="wide")
-
-# App Title
-st.markdown("<h2 style='text-align: center;'>CSP Monthly Cost Dashboard</h2>", unsafe_allow_html=True)
-
-# FY Filter
-fy_options = sorted(df["FY"].unique())
+# ------------------ Filters ------------------
+fy_options = sorted(df_services["FY"].unique())
 selected_fy = st.selectbox("Select Fiscal Year (FY):", fy_options)
 
-# Filter data
-filtered_df = df[df["FY"] == selected_fy]
+filtered_df = df_services[df_services["FY"] == selected_fy]
 
 # ------------------ Line Chart ------------------
-if not filtered_df.empty:
-    max_cost = filtered_df["Cost"].max()
+fig_line = px.line(
+    filtered_df,
+    x="Month",
+    y="Cost",
+    color="CSP",
+    markers=True,
+    hover_data=["FY"]
+)
 
-    fig = px.line(
-        filtered_df,
-        x="Month",
-        y="Cost",
-        color="CSP",
-        markers=True,
-        hover_data=["FY"]
-    )
+fig_line.add_annotation(
+    x=filtered_df["Month"].iloc[len(filtered_df)//2],
+    y=filtered_df["Cost"].max() * 1.05,
+    text="CSP Monthly Cost (AWS vs Azure)",
+    showarrow=False,
+    font=dict(size=18),
+    xanchor="center"
+)
 
-    # Add top-centered annotation title inside chart
-    fig.add_annotation(
-        x=filtered_df["Month"].iloc[len(filtered_df) // 2],
-        y=max_cost * 1.05,
-        text="CSP Monthly Cost (AWS vs Azure)",
-        showarrow=False,
-        font=dict(size=18),
-        xanchor="center"
-    )
+fig_line.update_layout(
+    hovermode="x unified",
+    xaxis=dict(
+        showspikes=True,
+        spikecolor="gray",
+        spikethickness=1,
+        spikedash="dot",
+        spikemode="across"
+    ),
+    yaxis=dict(
+        showspikes=True,
+        spikecolor="gray",
+        spikethickness=1,
+        spikedash="dot",
+        spikemode="across"
+    ),
+    margin=dict(t=100)
+)
 
-    # Enable vertical hover line
+# ------------------ Waterfall Chart Function ------------------
+def create_waterfall(df, title, color):
+    fig = go.Figure(go.Waterfall(
+        x=df.iloc[:, 0],  # first column (e.g. Service / Category)
+        y=df.iloc[:, 1],  # second column (e.g. Cost / Value)
+        measure=["relative"] * (len(df) - 1) + ["total"],
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        increasing={"marker": {"color": color}},
+        decreasing={"marker": {"color": color}},
+        totals={"marker": {"color": "darkblue"}}
+    ))
+
     fig.update_layout(
-        hovermode="x unified",
-        xaxis=dict(
-            showspikes=True,
-            spikecolor="gray",
-            spikethickness=1,
-            spikedash="dot",
-            spikemode="across"
-        ),
-        yaxis=dict(
-            showspikes=True,
-            spikecolor="gray",
-            spikethickness=1,
-            spikedash="dot",
-            spikemode="across"
-        ),
-        margin=dict(t=100)
+        title=dict(text=title, x=0.5, xanchor="center", font=dict(size=18)),
+        waterfallgap=0.3
     )
+    return fig
 
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("No data available for the selected Fiscal Year.")
+# Create waterfall charts
+fig_services = create_waterfall(df_services, "CSP Services Spend", "royalblue")
+fig_marketplace = create_waterfall(df_marketplace, "CSP Marketplace Spend", "deepskyblue")
+
+# ------------------ Layout ------------------
+st.plotly_chart(fig_line, use_container_width=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.plotly_chart(fig_services, use_container_width=True)
+with col2:
+    st.plotly_chart(fig_marketplace, use_container_width=True)
